@@ -60,7 +60,7 @@ jobs:
               body: "Tests are failing. Please fix the functionality issues first.",
               event: "REQUEST_CHANGES"
             });
-      
+
   code-review:
     runs-on: ubuntu-latest
     needs: test
@@ -68,6 +68,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      statuses: write # Added status permission
     
     steps:
       - uses: actions/checkout@v3
@@ -139,6 +140,8 @@ jobs:
       
       - name: PR Comment
         uses: actions/github-script@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -174,6 +177,7 @@ jobs:
             if (issuesFound) {
               const body = `# Code Review Feedback\n\n🎉 **Great job getting the tests to pass!** Now let's make sure your code follows best practices.\n\n${reviewComments.join("\n\n")}\n\n---\n\nPlease address these code quality issues by uncommenting the correct code sections and update your PR. Once all issues are fixed, your PR will be approved automatically.`;
               
+              // Only add comment (avoid review creation which requires additional permissions)
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
@@ -181,20 +185,31 @@ jobs:
                 body: body
               });
               
-              github.rest.pulls.createReview({
-                pull_number: context.issue.number,
+              // Instead of creating a review, just add a status check
+              github.rest.repos.createCommitStatus({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: "Tests are passing, but code quality issues were found. Please address them.",
-                event: "REQUEST_CHANGES"
+                sha: context.payload.pull_request.head.sha,
+                state: 'failure',
+                description: 'Code quality issues found',
+                context: 'Code Review'
               });
             } else {
-              // All issues fixed, approve PR
-              github.rest.pulls.createReview({
-                pull_number: context.issue.number,
+              // Use comment instead of review
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: "🎉 Great job! All tests are passing and code quality standards have been met.",
-                event: "APPROVE"
+                body: "🎉 Great job! All tests are passing and code quality standards have been met."
+              });
+              
+              // Add success status
+              github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: context.payload.pull_request.head.sha,
+                state: 'success',
+                description: 'Code quality standards met',
+                context: 'Code Review'
               });
             }
