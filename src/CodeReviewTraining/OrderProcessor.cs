@@ -34,7 +34,7 @@ namespace CodeReviewTraining
                 throw new ArgumentNullException(nameof(orderRequest), "Order request cannot be null");
             }
 
-            Uncomment for VALIDATION issue - REQUIRED TO PASS TESTS
+            // Uncomment for VALIDATION issue - REQUIRED TO PASS TESTS
             if (!_validator.ValidateOrder(orderRequest))
             {
                 throw new ValidationException("Order request failed validation");
