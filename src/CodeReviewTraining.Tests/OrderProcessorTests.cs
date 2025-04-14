@@ -15,7 +15,7 @@ namespace CodeReviewTraining.Tests
         public OrderProcessorTests()
         {
             _loggerMock = new Mock<ILogger<OrderProcessor>>();
-            _validatorMock = new Mock<IValidator>>();
+            _validatorMock = new Mock<IValidator>(); // Fixed: Removed extra > character
             _databaseMock = new Mock<IDatabase>();
             _orderProcessor = new OrderProcessor(_loggerMock.Object, _validatorMock.Object, _databaseMock.Object);
         }
