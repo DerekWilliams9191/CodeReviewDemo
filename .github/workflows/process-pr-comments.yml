@@ -1,8 +1,7 @@
 name: Process PR Comments
 
 on:
-  schedule:
-    # Run every 15 minutes
+  #schedule:
     #- cron: '*/1 * * * *'
   # Optional: Allow manual triggering
   workflow_dispatch:
