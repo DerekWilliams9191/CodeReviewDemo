@@ -2,7 +2,7 @@ name: Code Review Training
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, reopened, synchronize]
     branches: [ main ]
 
 jobs:
@@ -11,6 +11,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    outputs:
+      test_passed: ${{ steps.test.outputs.test_passed }}
     
     steps:
       - uses: actions/checkout@v3
@@ -58,14 +60,14 @@ jobs:
               body: "Tests are failing. Please fix the functionality issues first.",
               event: "REQUEST_CHANGES"
             });
-      
+
   code-review:
     runs-on: ubuntu-latest
     needs: test
     if: needs.test.outputs.test_passed == 'true'
+    # Keep minimal permissions as we're not directly commenting
     permissions:
       contents: read
-      pull-requests: write
     
     steps:
       - uses: actions/checkout@v3
@@ -83,7 +85,6 @@ jobs:
           # Get all C# files that were modified in this PR
           FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '\.cs$')
 
-          
           # Initialize tracking variables
           ISSUES_FOUND=false
           MISSING_NULL_CHECKS=false
@@ -134,65 +135,69 @@ jobs:
           echo "missing_documentation=$MISSING_DOCUMENTATION" >> $GITHUB_OUTPUT
           echo "missing_exception_handling=$MISSING_EXCEPTION_HANDLING" >> $GITHUB_OUTPUT
           echo "missing_logging=$MISSING_LOGGING" >> $GITHUB_OUTPUT
-      
-      - name: PR Comment
-        uses: actions/github-script@v6
+
+      # Create the PR comment markdown file
+      - name: Generate PR Comment
+        id: generate_comment
+        run: |
+          # Build feedback text
+          echo "## Code Review Results" > pr_comment.md
+          
+          if [ "${{ steps.analyze.outputs.issues_found }}" == "true" ]; then
+            echo "" >> pr_comment.md
+            echo "🔍 **Code Quality Issues Found:**" >> pr_comment.md
+            echo "" >> pr_comment.md
+            
+            if [ "${{ steps.analyze.outputs.missing_null_checks }}" == "true" ]; then
+              echo "- ❌ **Missing Null Checks**: The code is missing important null checks. Look for commented lines with null checks and uncomment them." >> pr_comment.md
+            fi
+            
+            if [ "${{ steps.analyze.outputs.missing_validation }}" == "true" ]; then
+              echo "- ❌ **Missing Input Validation**: The code doesn't validate inputs before processing them. Find and uncomment the validation code." >> pr_comment.md
+            fi
+            
+            if [ "${{ steps.analyze.outputs.missing_documentation }}" == "true" ]; then
+              echo "- ❌ **Missing Documentation**: The code lacks proper XML documentation. Uncomment the documentation sections." >> pr_comment.md
+            fi
+            
+            if [ "${{ steps.analyze.outputs.missing_exception_handling }}" == "true" ]; then
+              echo "- ❌ **Missing Exception Handling**: The code doesn't properly handle exceptions. Uncomment the try/catch blocks." >> pr_comment.md
+            fi
+            
+            if [ "${{ steps.analyze.outputs.missing_logging }}" == "true" ]; then
+              echo "- ❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements." >> pr_comment.md
+            fi
+            
+            echo "" >> pr_comment.md
+            echo "Please address these code quality issues by uncommenting the correct code sections and update your PR." >> pr_comment.md
+          else
+            echo "" >> pr_comment.md
+            echo "🎉 **Great job!** All tests are passing and code quality standards have been met." >> pr_comment.md
+          fi
+
+      # Upload the PR comment as an artifact to be processed by the cron job
+      - name: Upload PR comment artifact
+        uses: actions/upload-artifact@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issuesFound = ${{ steps.analyze.outputs.issues_found }};
-            const missingNullChecks = ${{ steps.analyze.outputs.missing_null_checks }};
-            const missingValidation = ${{ steps.analyze.outputs.missing_validation }};
-            const missingDocumentation = ${{ steps.analyze.outputs.missing_documentation }};
-            const missingExceptionHandling = ${{ steps.analyze.outputs.missing_exception_handling }};
-            const missingLogging = ${{ steps.analyze.outputs.missing_logging }};
-            
-            let reviewComments = [];
-            
-            if (missingNullChecks) {
-              reviewComments.push("❌ **Missing Null Checks**: The code is missing important null checks. Look for commented lines with null checks and uncomment them.");
-            }
-            
-            if (missingValidation) {
-              reviewComments.push("❌ **Missing Input Validation**: The code doesn't validate inputs before processing them. Find and uncomment the validation code.");
-            }
-            
-            if (missingDocumentation) {
-              reviewComments.push("❌ **Missing Documentation**: The code lacks proper XML documentation. Uncomment the documentation sections.");
-            }
-            
-            if (missingExceptionHandling) {
-              reviewComments.push("❌ **Missing Exception Handling**: The code doesn't properly handle exceptions. Uncomment the try/catch blocks.");
-            }
-            
-            if (missingLogging) {
-              reviewComments.push("❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements.");
-            }
-            
-            if (issuesFound) {
-              const body = `# Code Review Feedback\n\n🎉 **Great job getting the tests to pass!** Now let's make sure your code follows best practices.\n\n${reviewComments.join("\n\n")}\n\n---\n\nPlease address these code quality issues by uncommenting the correct code sections and update your PR. Once all issues are fixed, your PR will be approved automatically.`;
-              
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-              
-              github.rest.pulls.createReview({
-                pull_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: "Tests are passing, but code quality issues were found. Please address them.",
-                event: "REQUEST_CHANGES"
-              });
-            } else {
-              // All issues fixed, approve PR
-              github.rest.pulls.createReview({
-                pull_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: "🎉 Great job! All tests are passing and code quality standards have been met.",
-                event: "APPROVE"
-              });
-            }
+          name: pr-comment-${{ github.event.pull_request.number }}
+          path: pr_comment.md
+          retention-days: 1  # We only need it until the cron job picks it up
+
+      # For compatibility with the previous workflow, still generate the results file
+      - name: Generate results file
+        id: generate_results
+        run: |
+          cp pr_comment.md code_review_results.md
+          
+          if [ "${{ steps.analyze.outputs.issues_found }}" == "true" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+          fi
+
+      # Upload results file as an artifact (for reference)
+      - name: Upload code review results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-review-results
+          path: code_review_results.md
