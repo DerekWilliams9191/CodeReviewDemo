@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Extensions.Logging;
 
+
 namespace CodeReviewTraining
 {
     /// <summary>
