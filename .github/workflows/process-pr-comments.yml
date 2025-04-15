@@ -1,0 +1,26 @@
+name: Process PR Comments
+
+on:
+  schedule:
+    # Run every 15 minutes
+    #- cron: '*/1 * * * *'
+  # Optional: Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  process-comments:
+    runs-on: ubuntu-latest
+    # These permissions are needed to post comments
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    
+    steps:
+      - name: Process PR comment artifacts
+        uses: nyurik/auto_pr_comments_from_forks@v1
+        with:
+          # Repository credentials
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: Custom artifact name prefix (should match the name in the PR workflow)
+          artifact_name_prefix: pr-comment-
