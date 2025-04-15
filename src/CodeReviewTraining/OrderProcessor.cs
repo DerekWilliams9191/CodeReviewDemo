@@ -21,7 +21,7 @@ namespace CodeReviewTraining
 
         // THIS CODE NEEDS REVIEW
         // STEP 1: First uncomment the null checks and validation to make tests pass
-        // STEP 2: Then address the remaining code quality issues for PR approval
+
 
         public OrderConfirmation ProcessOrder(OrderRequest orderRequest)
         {
