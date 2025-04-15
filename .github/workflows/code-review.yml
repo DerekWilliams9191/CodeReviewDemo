@@ -2,7 +2,7 @@ name: Code Review Training
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, reopened, synchronize]
     branches: [ main ]
 
 jobs:
@@ -61,13 +61,20 @@ jobs:
               event: "REQUEST_CHANGES"
             });
 
+            
+
+
+
+            name: PR Code Review Action
+
   code-review:
     runs-on: ubuntu-latest
     needs: test
     if: needs.test.outputs.test_passed == 'true'
-    # Keep minimal permissions
+    # Add permission for pull requests to post comments
     permissions:
       contents: read
+      pull-requests: write
     
     steps:
       - uses: actions/checkout@v3
@@ -85,7 +92,6 @@ jobs:
           # Get all C# files that were modified in this PR
           FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '\.cs$')
 
-          
           # Initialize tracking variables
           ISSUES_FOUND=false
           MISSING_NULL_CHECKS=false
@@ -137,66 +143,81 @@ jobs:
           echo "missing_exception_handling=$MISSING_EXCEPTION_HANDLING" >> $GITHUB_OUTPUT
           echo "missing_logging=$MISSING_LOGGING" >> $GITHUB_OUTPUT
 
-      # Create output file with results (instead of using GitHub API)
-      - name: Generate results file
-        id: generate_results
+      # Generate review comment content
+      - name: Prepare PR Comment
+        id: prepare_comment
         run: |
           # Build feedback text
-          echo "## Code Review Results" > code_review_results.md
+          echo "comment<<EOF" >> $GITHUB_OUTPUT
+          echo "## Code Review Results" >> $GITHUB_OUTPUT
           
           if [ "${{ steps.analyze.outputs.issues_found }}" == "true" ]; then
-            echo "" >> code_review_results.md
-            echo "🔍 **Code Quality Issues Found:**" >> code_review_results.md
-            echo "" >> code_review_results.md
+            echo "" >> $GITHUB_OUTPUT
+            echo "🔍 **Code Quality Issues Found:**" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
             
             if [ "${{ steps.analyze.outputs.missing_null_checks }}" == "true" ]; then
-              echo "- ❌ **Missing Null Checks**: The code is missing important null checks. Look for commented lines with null checks and uncomment them." >> code_review_results.md
+              echo "- ❌ **Missing Null Checks**: The code is missing important null checks. Look for commented lines with null checks and uncomment them." >> $GITHUB_OUTPUT
             fi
             
             if [ "${{ steps.analyze.outputs.missing_validation }}" == "true" ]; then
-              echo "- ❌ **Missing Input Validation**: The code doesn't validate inputs before processing them. Find and uncomment the validation code." >> code_review_results.md
+              echo "- ❌ **Missing Input Validation**: The code doesn't validate inputs before processing them. Find and uncomment the validation code." >> $GITHUB_OUTPUT
             fi
             
             if [ "${{ steps.analyze.outputs.missing_documentation }}" == "true" ]; then
-              echo "- ❌ **Missing Documentation**: The code lacks proper XML documentation. Uncomment the documentation sections." >> code_review_results.md
+              echo "- ❌ **Missing Documentation**: The code lacks proper XML documentation. Uncomment the documentation sections." >> $GITHUB_OUTPUT
             fi
             
             if [ "${{ steps.analyze.outputs.missing_exception_handling }}" == "true" ]; then
-              echo "- ❌ **Missing Exception Handling**: The code doesn't properly handle exceptions. Uncomment the try/catch blocks." >> code_review_results.md
+              echo "- ❌ **Missing Exception Handling**: The code doesn't properly handle exceptions. Uncomment the try/catch blocks." >> $GITHUB_OUTPUT
             fi
             
             if [ "${{ steps.analyze.outputs.missing_logging }}" == "true" ]; then
-              echo "- ❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements." >> code_review_results.md
+              echo "- ❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements." >> $GITHUB_OUTPUT
             fi
             
-            echo "" >> code_review_results.md
-            echo "---" >> code_review_results.md
-            echo "" >> code_review_results.md
-            echo "Please address these code quality issues by uncommenting the correct code sections and update your PR." >> code_review_results.md
+            echo "" >> $GITHUB_OUTPUT
+            echo "Please address these code quality issues by uncommenting the correct code sections and update your PR." >> $GITHUB_OUTPUT
+          else
+            echo "" >> $GITHUB_OUTPUT
+            echo "🎉 **Great job!** All tests are passing and code quality standards have been met." >> $GITHUB_OUTPUT
+          fi
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # Post the comment to the PR using github-script
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { issue: { number: issue_number }, repo: { owner, repo } } = context;
             
-            # Set job output to failure for GitHub Actions summary
+            // Get the comment from previous step
+            const commentBody = `${{ steps.prepare_comment.outputs.comment }}`;
+            
+            // Post the comment on the PR
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: commentBody
+            });
+
+      # For compatibility with the previous workflow, still generate the results file
+      - name: Generate results file
+        id: generate_results
+        run: |
+          echo "${{ steps.prepare_comment.outputs.comment }}" > code_review_results.md
+          
+          if [ "${{ steps.analyze.outputs.issues_found }}" == "true" ]; then
             echo "status=failure" >> $GITHUB_OUTPUT
           else
-            echo "" >> code_review_results.md
-            echo "🎉 **Great job!** All tests are passing and code quality standards have been met." >> code_review_results.md
-            
-            # Set job output to success for GitHub Actions summary
             echo "status=success" >> $GITHUB_OUTPUT
           fi
 
-      # Upload results file as an artifact (avoids API calls)
+      # Upload results file as an artifact (for reference)
       - name: Upload code review results
         uses: actions/upload-artifact@v3
         with:
           name: code-review-results
           path: code_review_results.md
-          
-      # Use GitHub Actions workflow commands for job status
-      - name: Set job status
-        run: |
-          if [ "${{ steps.generate_results.outputs.status }}" == "failure" ]; then
-            echo "Code quality issues found. See uploaded artifacts for details."
-            exit 1
-          else
-            echo "All code quality checks passed!"
-          fi
