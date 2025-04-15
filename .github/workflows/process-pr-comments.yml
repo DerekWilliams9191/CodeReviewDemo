@@ -2,7 +2,7 @@ name: Process PR Comments
 
 on:
   #schedule:
-    #- cron: '*/1 * * * *'
+    #- cron: '*/15 * * * *'
   # Optional: Allow manual triggering
   workflow_dispatch:
 
@@ -17,7 +17,7 @@ jobs:
     
     steps:
       - name: Process PR comment artifacts
-        uses: nyurik/auto_pr_comments_from_forks@v1
+        uses: nyurik/auto_pr_comments_from_forks@main
         with:
           # Repository credentials
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
