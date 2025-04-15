@@ -1,11 +1,6 @@
-///
-/// Remove this comment.
-/// We are only doing this so there is a difference between main and your branch.
-/// 
-
-
 using System;
 using Microsoft.Extensions.Logging;
+
 
 namespace CodeReviewTraining
 {
@@ -27,7 +22,7 @@ namespace CodeReviewTraining
 
         // THIS CODE NEEDS REVIEW
         // STEP 1: First uncomment the null checks and validation to make tests pass
-        // STEP 2: Then address the remaining code quality issues for PR approval
+
 
         public OrderConfirmation ProcessOrder(OrderRequest orderRequest)
         {
@@ -35,7 +30,7 @@ namespace CodeReviewTraining
             // ===========================================================
             
             // Uncomment for NULL CHECKS issue - REQUIRED TO PASS TESTS
-            /*
+            
             if (orderRequest == null)
             {
                 throw new ArgumentNullException(nameof(orderRequest), "Order request cannot be null");
@@ -46,15 +41,15 @@ namespace CodeReviewTraining
             {
                 throw new ValidationException("Order request failed validation");
             }
-            */
+            
 
             OrderConfirmation confirmation = null;
             
             // Uncomment for EXCEPTION HANDLING issue - REQUIRED TO PASS TESTS
-            /*
+            
             try
             {
-            */
+            
                 var order = new Order
                 {
                     OrderId = Guid.NewGuid(),
@@ -71,14 +66,14 @@ namespace CodeReviewTraining
                     TrackingNumber = GenerateTrackingNumber(),
                     EstimatedDelivery = DateTime.UtcNow.AddDays(3)
                 };
-            /*
+            
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing order for customer {CustomerId}", orderRequest.CustomerId);
                 throw;
             }
-            */
+            
 
             return confirmation;
             
