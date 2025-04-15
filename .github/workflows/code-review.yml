@@ -42,7 +42,7 @@ jobs:
         if: steps.test.outputs.test_passed == 'false'
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.GH_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const body = `# ❌ Unit Tests Failed\n\nThe unit tests for this PR are failing. Before we can review the code quality, you need to make the tests pass.\n\nPlease uncomment the necessary code to fix the functionality issues, then we'll review the code for best practices.\n\nCommon issues that might cause test failures:\n- Missing null checks\n- Missing input validation\n- Exception handling is incomplete`;
             
@@ -60,12 +60,12 @@ jobs:
               body: "Tests are failing. Please fix the functionality issues first.",
               event: "REQUEST_CHANGES"
             });
-
+            
   code-review:
     runs-on: ubuntu-latest
     needs: test
     if: needs.test.outputs.test_passed == 'true'
-    # Set permissions at the job level - this is crucial for PR comments
+    # Set permissions at the workflow level
     permissions:
       contents: read
       pull-requests: write
@@ -143,61 +143,51 @@ jobs:
         id: prepare_comment
         run: |
           # Build feedback text
-          echo "comment<<EOF" >> $GITHUB_OUTPUT
-          echo "## Code Review Results" >> $GITHUB_OUTPUT
+          comment="## Code Review Results"
           
           if [ "${{ steps.analyze.outputs.issues_found }}" == "true" ]; then
-            echo "" >> $GITHUB_OUTPUT
-            echo "🔍 **Code Quality Issues Found:**" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
+            comment="$comment\n\n🔍 **Code Quality Issues Found:**\n"
             
             if [ "${{ steps.analyze.outputs.missing_null_checks }}" == "true" ]; then
-              echo "- ❌ **Missing Null Checks**: The code is missing important null checks. Look for commented lines with null checks and uncomment them." >> $GITHUB_OUTPUT
+              comment="$comment\n- ❌ **Missing Null Checks**: The code is missing important null checks. Look for commented lines with null checks and uncomment them."
             fi
             
             if [ "${{ steps.analyze.outputs.missing_validation }}" == "true" ]; then
-              echo "- ❌ **Missing Input Validation**: The code doesn't validate inputs before processing them. Find and uncomment the validation code." >> $GITHUB_OUTPUT
+              comment="$comment\n- ❌ **Missing Input Validation**: The code doesn't validate inputs before processing them. Find and uncomment the validation code."
             fi
             
             if [ "${{ steps.analyze.outputs.missing_documentation }}" == "true" ]; then
-              echo "- ❌ **Missing Documentation**: The code lacks proper XML documentation. Uncomment the documentation sections." >> $GITHUB_OUTPUT
+              comment="$comment\n- ❌ **Missing Documentation**: The code lacks proper XML documentation. Uncomment the documentation sections."
             fi
             
             if [ "${{ steps.analyze.outputs.missing_exception_handling }}" == "true" ]; then
-              echo "- ❌ **Missing Exception Handling**: The code doesn't properly handle exceptions. Uncomment the try/catch blocks." >> $GITHUB_OUTPUT
+              comment="$comment\n- ❌ **Missing Exception Handling**: The code doesn't properly handle exceptions. Uncomment the try/catch blocks."
             fi
             
             if [ "${{ steps.analyze.outputs.missing_logging }}" == "true" ]; then
-              echo "- ❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements." >> $GITHUB_OUTPUT
+              comment="$comment\n- ❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements."
             fi
             
-            echo "" >> $GITHUB_OUTPUT
-            echo "Please address these code quality issues by uncommenting the correct code sections and update your PR." >> $GITHUB_OUTPUT
+            comment="$comment\n\nPlease address these code quality issues by uncommenting the correct code sections and update your PR."
           else
-            echo "" >> $GITHUB_OUTPUT
-            echo "🎉 **Great job!** All tests are passing and code quality standards have been met." >> $GITHUB_OUTPUT
+            comment="$comment\n\n🎉 **Great job!** All tests are passing and code quality standards have been met."
           fi
-          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Save comment to file for the comment action
+          echo "$comment" > pr_comment.txt
 
-      # Post the comment to the PR using a dedicated action for comments
+      # Use a specialized action for commenting on PRs - works with fork PRs
       - name: Comment on PR
-        uses: actions/github-script@v7
+        uses: peter-evans/create-or-update-comment@v3
         with:
-          github-token: ${{ secrets.GH_PAT }}
-          script: |
-            // Use the REST API with explicit permissions
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `${{ steps.prepare_comment.outputs.comment }}`
-            });
+          issue-number: ${{ github.event.pull_request.number }}
+          body-file: pr_comment.txt
 
       # For compatibility with the previous workflow, still generate the results file
       - name: Generate results file
         id: generate_results
         run: |
-          echo "${{ steps.prepare_comment.outputs.comment }}" > code_review_results.md
+          cat pr_comment.txt > code_review_results.md
           
           if [ "${{ steps.analyze.outputs.issues_found }}" == "true" ]; then
             echo "status=failure" >> $GITHUB_OUTPUT
