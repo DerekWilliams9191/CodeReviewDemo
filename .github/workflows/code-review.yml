@@ -118,6 +118,13 @@ jobs:
           # Create an array to store line-specific comments
           echo "[]" > artifacts/line_comments.json
           
+          # Store the PR base SHA and head SHA for later use in comments
+          echo "${{ github.event.pull_request.base.sha }}" > artifacts/pr_base_sha.txt
+          echo "${{ github.event.pull_request.head.sha }}" > artifacts/pr_head_sha.txt
+          
+          # Save PR number for reference
+          echo "${{ github.event.pull_request.number }}" > artifacts/pr_number.txt
+          
           # Loop through each modified C# file
           for FILE in $FILES; do
             echo "Analyzing $FILE..."
@@ -126,126 +133,258 @@ jobs:
             LINE_ISSUES_FILE="line_issues_$(basename "$FILE").json"
             echo "[]" > "$LINE_ISSUES_FILE"
             
-            # Get the line numbers with null check issues
-            NULL_CHECK_LINES=$(grep -n "//\s*if\s*(.*\s*==\s*null)" "$FILE" | cut -d: -f1)
+            # Get the line numbers with null check issues and capture the actual code
+            NULL_CHECK_LINES=$(grep -n "//\s*if\s*(.*\s*==\s*null)" "$FILE")
             if [ -n "$NULL_CHECK_LINES" ]; then
               MISSING_NULL_CHECKS=true
               ISSUES_FOUND=true
               
-              # For each line with a null check issue, add a comment
-              for LINE in $NULL_CHECK_LINES; do
-                COMMENT="Missing null check: This appears to be a commented-out null check. For proper error handling, uncomment this code to validate inputs before processing."
+              # Process each line with a null check issue
+              echo "$NULL_CHECK_LINES" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                # Extract the actual code from the comment for better feedback
+                CODE_SNIPPET=$(echo "$LINE_CONTENT" | sed -E 's/^[ \t]*\/\/[ \t]*(.*)/\1/')
+                
+                COMMENT="**Missing Null Check**
+
+This appears to be a commented-out null check. For proper error handling, uncomment this line:
+
+\`\`\`csharp
+${CODE_SNIPPET}
+\`\`\`
+
+Null checks are essential for preventing NullReferenceExceptions and ensuring robust code."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
             fi
             
-            # Check for input validation issues
-            VALIDATION_LINES=$(grep -n "//\s*if\s*(!.*\.IsValid" "$FILE" | cut -d: -f1)
-            VALIDATION_LINES2=$(grep -n "//\s*validator\.Validate" "$FILE" | cut -d: -f1)
-            if [ -n "$VALIDATION_LINES" ] || [ -n "$VALIDATION_LINES2" ]; then
+            # Check for input validation issues and capture the actual code
+            VALIDATION_LINES=$(grep -n "//\s*if\s*(!.*\.IsValid" "$FILE")
+            VALIDATION_LINES2=$(grep -n "//\s*validator\.Validate" "$FILE")
+            
+            # Process validation check lines
+            if [ -n "$VALIDATION_LINES" ]; then
               MISSING_VALIDATION=true
               ISSUES_FOUND=true
               
-              # Process all validation lines
-              for LINE in $VALIDATION_LINES $VALIDATION_LINES2; do
-                COMMENT="Missing input validation: This commented code contains important input validation logic. Uncomment it to ensure proper validation of inputs."
+              echo "$VALIDATION_LINES" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                # Extract the actual code from the comment
+                CODE_SNIPPET=$(echo "$LINE_CONTENT" | sed -E 's/^[ \t]*\/\/[ \t]*(.*)/\1/')
+                
+                COMMENT="**Missing Input Validation**
+
+This commented code contains important validation logic. To ensure data integrity, uncomment this validation:
+
+\`\`\`csharp
+${CODE_SNIPPET}
+\`\`\`
+
+Proper input validation prevents invalid data from corrupting your application state."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
             fi
             
-            # Check for documentation issues
-            DOC_LINES=$(grep -n "Uncomment for DOCUMENTATION issue" "$FILE" | cut -d: -f1)
+            # Process validator lines
+            if [ -n "$VALIDATION_LINES2" ]; then
+              MISSING_VALIDATION=true
+              ISSUES_FOUND=true
+              
+              echo "$VALIDATION_LINES2" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                # Extract the actual code from the comment
+                CODE_SNIPPET=$(echo "$LINE_CONTENT" | sed -E 's/^[ \t]*\/\/[ \t]*(.*)/\1/')
+                
+                COMMENT="**Missing Validator Call**
+
+This commented validator code is necessary for proper validation. Uncomment this line:
+
+\`\`\`csharp
+${CODE_SNIPPET}
+\`\`\`
+
+Validators provide a centralized way to enforce business rules across your application."
+                
+                # Add to the line issues JSON
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
+                  '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
+                echo "$TMP" > "$LINE_ISSUES_FILE"
+              done
+            fi
+            
+            # Check for documentation issues with marker comments
+            DOC_LINES=$(grep -n "Uncomment for DOCUMENTATION issue" "$FILE")
             if [ -n "$DOC_LINES" ]; then
               MISSING_DOCUMENTATION=true
               ISSUES_FOUND=true
               
-              for LINE in $DOC_LINES; do
-                COMMENT="Missing documentation: XML documentation is required for public methods and classes. Uncomment the documentation comments."
+              echo "$DOC_LINES" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                # Look ahead a few lines to find the actual documentation
+                DOC_BLOCK=$(tail -n +$LINE_NUM "$FILE" | head -5)
+                
+                COMMENT="**Missing Documentation**
+
+Documentation marker found. Please uncomment the XML documentation near this line.
+
+Documentation helps other developers understand your code's purpose, parameters, and return values.
+
+Look for commented XML doc blocks with \`<summary>\`, \`<param>\`, and \`<returns>\` tags."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
             fi
             
             # Find block commented documentation
-            DOC_BLOCK_LINES=$(grep -n -A 1 "/\*.*/// <summary>" "$FILE" | head -1 | cut -d: -f1)
+            DOC_BLOCK_LINES=$(grep -n -A 1 "/\*.*/// <summary>" "$FILE" | head -1)
             if [ -n "$DOC_BLOCK_LINES" ]; then
               MISSING_DOCUMENTATION=true
               ISSUES_FOUND=true
               
-              for LINE in $DOC_BLOCK_LINES; do
-                COMMENT="Missing documentation: XML documentation is block-commented. Uncomment this documentation block to properly document the code."
+              LINE_NUM=$(echo "$DOC_BLOCK_LINES" | cut -d: -f1)
+              
+              # Extract the first couple of lines of the doc block for context
+              DOC_CONTENT=$(tail -n +$LINE_NUM "$FILE" | head -3 | sed -E 's/^[ \t]*\/\*[ \t]*(.*)/\1/')
+              
+              COMMENT="**Missing XML Documentation**
+
+This appears to be block-commented documentation. XML documentation is required for public classes and methods:
+
+\`\`\`csharp
+/// <summary>
+/// [Description of the method/class]
+/// </summary>
+\`\`\`
+
+Uncomment this block to properly document your code and enable IntelliSense help for other developers."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
             fi
             
             # Check for exception handling issues
-            TRY_LINES=$(grep -n "//\s*try" "$FILE" | cut -d: -f1)
-            CATCH_LINES=$(grep -n "//\s*catch" "$FILE" | cut -d: -f1)
-            if [ -n "$TRY_LINES" ] || [ -n "$CATCH_LINES" ]; then
+            TRY_LINES=$(grep -n "//\s*try" "$FILE")
+            CATCH_LINES=$(grep -n "//\s*catch" "$FILE")
+            
+            # Process try block lines
+            if [ -n "$TRY_LINES" ]; then
               MISSING_EXCEPTION_HANDLING=true
               ISSUES_FOUND=true
               
-              # Process try/catch lines
-              for LINE in $TRY_LINES; do
-                COMMENT="Missing exception handling: Uncomment this try block to properly handle exceptions."
+              echo "$TRY_LINES" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                # Extract the actual code
+                CODE_SNIPPET=$(echo "$LINE_CONTENT" | sed -E 's/^[ \t]*\/\/[ \t]*(.*)/\1/')
+                
+                COMMENT="**Missing Exception Handling: Try Block**
+
+This commented code contains a try block that should be uncommented:
+
+\`\`\`csharp
+${CODE_SNIPPET}
+\`\`\`
+
+Proper exception handling prevents application crashes and provides a better user experience when errors occur. Make sure to also uncomment any associated catch and finally blocks."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
+            fi
+            
+            # Process catch block lines
+            if [ -n "$CATCH_LINES" ]; then
+              MISSING_EXCEPTION_HANDLING=true
+              ISSUES_FOUND=true
               
-              for LINE in $CATCH_LINES; do
-                COMMENT="Missing exception handling: Uncomment this catch block to properly handle exceptions."
+              echo "$CATCH_LINES" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                # Extract the actual code
+                CODE_SNIPPET=$(echo "$LINE_CONTENT" | sed -E 's/^[ \t]*\/\/[ \t]*(.*)/\1/')
+                
+                COMMENT="**Missing Exception Handling: Catch Block**
+
+This commented code contains a catch block that should be uncommented:
+
+\`\`\`csharp
+${CODE_SNIPPET}
+\`\`\`
+
+Exception handling is incomplete without proper catch blocks. Remember to log exceptions and provide appropriate user feedback."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
             fi
             
             # Check for logging issues
-            LOGGING_LINES=$(grep -n "Uncomment for LOGGING issue" "$FILE" | cut -d: -f1)
-            LOGGER_LINES=$(grep -n -A 1 "/\*.*_logger\.Log" "$FILE" | head -1 | cut -d: -f1)
-            if [ -n "$LOGGING_LINES" ] || [ -n "$LOGGER_LINES" ]; then
+            LOGGING_LINES=$(grep -n "Uncomment for LOGGING issue" "$FILE")
+            LOGGER_LINES=$(grep -n -A 1 "/\*.*_logger\.Log" "$FILE" | head -1)
+            
+            # Process logging marker lines
+            if [ -n "$LOGGING_LINES" ]; then
               MISSING_LOGGING=true
               ISSUES_FOUND=true
               
-              # Process logging lines
-              for LINE in $LOGGING_LINES $LOGGER_LINES; do
-                COMMENT="Missing logging: Proper logging is important for production monitoring and debugging. Uncomment these logging statements."
+              echo "$LOGGING_LINES" | while IFS=: read -r LINE_NUM LINE_CONTENT; do
+                COMMENT="**Missing Logging**
+
+Logging marker found near this line. Proper logging is essential for:
+
+- Troubleshooting production issues
+- Monitoring application health
+- Tracking user activity and errors
+- Performance analysis
+
+Look for commented logging statements nearby and uncomment them."
+                
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               done
             fi
             
-            # STEP 2 section check
-            STEP2_LINE=$(grep -n "STEP 2: AFTER TESTS PASS" "$FILE" | cut -d: -f1)
-            if [ -n "$STEP2_LINE" ]; then
-              # Check for 30 lines after STEP 2 marker for block comments
-              STEP2_SECTION=$(tail -n +$STEP2_LINE "$FILE" | head -30)
-              if echo "$STEP2_SECTION" | grep -q "/\*"; then
-                STEP2_COMMENT_LINE=$((STEP2_LINE + $(echo "$STEP2_SECTION" | grep -n "/\*" | head -1 | cut -d: -f1) - 1))
-                MISSING_LOGGING=true
-                MISSING_DOCUMENTATION=true
-                ISSUES_FOUND=true
+            # Process commented logger calls
+            if [ -n "$LOGGER_LINES" ]; then
+              MISSING_LOGGING=true
+              ISSUES_FOUND=true
+              
+              LINE_NUM=$(echo "$LOGGER_LINES" | cut -d: -f1)
+              
+              # Get a few lines of context for the logger
+              LOGGER_BLOCK=$(tail -n +$LINE_NUM "$FILE" | head -3 | grep -v "^\-\-" | sed -E 's/^[ \t]*\/\*[ \t]*(.*)/\1/')
+              
+              COMMENT="**Missing Logger Calls**
+
+Found block-commented logging code. Application logging is critical for production monitoring:
+
+\`\`\`csharp
+// Logging example
+_logger.LogInformation("Operation completed: {Result}", result);
+\`\`\`
+
+Uncomment the logger calls in this block to improve application observability."
                 
-                COMMENT="Code quality issues in STEP 2: There are block-commented sections in STEP 2 that should be uncommented. These may include logging and documentation."
                 # Add to the line issues JSON
-                TMP=$(jq --arg file "$FILE" --arg line "$STEP2_COMMENT_LINE" --arg body "$COMMENT" \
+                TMP=$(jq --arg file "$FILE" --arg line "$LINE_NUM" --arg body "$COMMENT" \
                   '. += [{"path": $file, "line": $line|tonumber, "body": $body}]' "$LINE_ISSUES_FILE")
+                echo "$TMP" > "$LINE_ISSUES_FILE"
+              done
+            fi
+            
+": $body}]' "$LINE_ISSUES_FILE")
                 echo "$TMP" > "$LINE_ISSUES_FILE"
               fi
             fi
