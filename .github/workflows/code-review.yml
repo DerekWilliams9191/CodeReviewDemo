@@ -131,8 +131,8 @@ jobs:
               ISSUES_FOUND=true
             fi
             
-            # Check for XML documentation
-            if grep -q "//\s*/// <summary>" "$FILE"; then
+            # FIXED: Check for XML documentation using patterns that match both line and block comments
+            if grep -q "//\s*/// <summary>" "$FILE" || grep -q "/\*\s*/// <summary>" "$FILE"; then
               MISSING_DOCUMENTATION=true
               ISSUES_FOUND=true
             fi
@@ -143,9 +143,17 @@ jobs:
               ISSUES_FOUND=true
             fi
             
-            # Check for logging
-            if grep -q "//\s*_logger\.Log" "$FILE" || grep -q "//\s*Console\.Write" "$FILE"; then
+            # FIXED: Check for logging using patterns that match both line and block comments
+            if grep -q "//\s*_logger\.Log" "$FILE" || grep -q "//\s*Console\.Write" "$FILE" || grep -q "/\*\s*_logger\.Log" "$FILE" || grep -E -q "/\*([^*]|\*[^/])*_logger\.Log" "$FILE"; then
               MISSING_LOGGING=true
+              ISSUES_FOUND=true
+            fi
+            
+            # Additional check for block commented sections of code related to STEP 2
+            if grep -E -q "STEP 2:.*AFTER TESTS PASS" "$FILE" && grep -E -q "/\*([^*]|\*[^/])*\*/" "$FILE"; then
+              echo "Found block commented STEP 2 sections"
+              MISSING_LOGGING=true
+              MISSING_DOCUMENTATION=true
               ISSUES_FOUND=true
             fi
           done
