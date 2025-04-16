@@ -131,10 +131,11 @@ jobs:
               ISSUES_FOUND=true
             fi
             
-            # FIXED: Check for XML documentation using patterns that match both line and block comments
-            if grep -q "//\s*/// <summary>" "$FILE" || grep -q "/\*\s*/// <summary>" "$FILE"; then
+            # NEW: Look for specific marker phrases
+            if grep -q "Uncomment for DOCUMENTATION issue" "$FILE"; then
               MISSING_DOCUMENTATION=true
               ISSUES_FOUND=true
+              echo "Found DOCUMENTATION issue marker"
             fi
             
             # Check for exception handling
@@ -143,20 +144,46 @@ jobs:
               ISSUES_FOUND=true
             fi
             
-            # FIXED: Check for logging using patterns that match both line and block comments
-            if grep -q "//\s*_logger\.Log" "$FILE" || grep -q "//\s*Console\.Write" "$FILE" || grep -q "/\*\s*_logger\.Log" "$FILE" || grep -E -q "/\*([^*]|\*[^/])*_logger\.Log" "$FILE"; then
+            # NEW: Look for specific marker phrases
+            if grep -q "Uncomment for LOGGING issue" "$FILE"; then
               MISSING_LOGGING=true
               ISSUES_FOUND=true
+              echo "Found LOGGING issue marker"
             fi
             
-            # Additional check for block commented sections of code related to STEP 2
-            if grep -E -q "STEP 2:.*AFTER TESTS PASS" "$FILE" && grep -E -q "/\*([^*]|\*[^/])*\*/" "$FILE"; then
-              echo "Found block commented STEP 2 sections"
+            # NEW: Check for block comments containing logger statements
+            if grep -qP "/\\*[\\s\\S]*?_logger\\.Log[\\s\\S]*?\\*/" "$FILE"; then
               MISSING_LOGGING=true
+              ISSUES_FOUND=true
+              echo "Found block commented logger statements"
+            fi
+            
+            # NEW: Check for block comments containing documentation
+            if grep -qP "/\\*[\\s\\S]*?/// <summary>[\\s\\S]*?\\*/" "$FILE"; then
               MISSING_DOCUMENTATION=true
               ISSUES_FOUND=true
+              echo "Found block commented documentation"
+            fi
+            
+            # SPECIAL CHECK: Test if STEP 2 exists with its indicators
+            if grep -q "STEP 2: AFTER TESTS PASS" "$FILE"; then
+              echo "Found STEP 2 marker - checking if any STEP 2 code is still commented"
+              # Look for block comments after STEP 2 marker
+              grep -A 30 "STEP 2: AFTER TESTS PASS" "$FILE" > step2_section.txt
+              if grep -q "/\*" step2_section.txt; then
+                echo "Found block comments in STEP 2 section"
+                MISSING_LOGGING=true
+                MISSING_DOCUMENTATION=true
+                ISSUES_FOUND=true
+              fi
             fi
           done
+          
+          # Debug - print final issue status for verification
+          echo "Final status:"
+          echo "ISSUES_FOUND=$ISSUES_FOUND"
+          echo "MISSING_LOGGING=$MISSING_LOGGING"
+          echo "MISSING_DOCUMENTATION=$MISSING_DOCUMENTATION"
           
           # Save the issues found status to a file
           echo "ISSUES_FOUND=$ISSUES_FOUND" > artifacts/analysis_results.txt
