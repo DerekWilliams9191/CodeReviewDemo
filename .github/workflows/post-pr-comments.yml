@@ -95,8 +95,8 @@ jobs:
           recreate: true
         continue-on-error: true
       
-      # Create an actual PR review with REQUEST_CHANGES or APPROVE status
-      - name: Create PR review
+      # Create an actual PR review with line-specific comments
+      - name: Create PR review with line comments
         if: steps.find_pr.outputs.pr_number != ''
         uses: actions/github-script@v6
         with:
@@ -115,6 +115,18 @@ jobs:
               const reviewType = fs.readFileSync('artifacts/review_type.txt', 'utf8').trim();
               const reviewBody = fs.readFileSync('artifacts/review_body.txt', 'utf8').trim();
               
+              // Check for line comments JSON
+              let comments = [];
+              if (fs.existsSync('artifacts/line_comments.json')) {
+                try {
+                  const lineCommentsData = fs.readFileSync('artifacts/line_comments.json', 'utf8');
+                  comments = JSON.parse(lineCommentsData);
+                  console.log(`Loaded ${comments.length} line-specific comments`);
+                } catch (parseError) {
+                  console.error('Error parsing line comments JSON:', parseError);
+                }
+              }
+              
               // Validate review type
               const validReviewTypes = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
               if (!validReviewTypes.includes(reviewType)) {
@@ -122,16 +134,24 @@ jobs:
                 return;
               }
               
-              // Create a review
+              // Format comments for the GitHub API
+              const formattedComments = comments.map(comment => ({
+                path: comment.path,
+                position: comment.line,
+                body: comment.body
+              }));
+              
+              // Create a review with line comments
               await github.rest.pulls.createReview({
                 pull_number: ${{ steps.find_pr.outputs.pr_number }},
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body: reviewBody,
-                event: reviewType
+                event: reviewType,
+                comments: formattedComments
               });
               
-              console.log(`Successfully created PR review of type: ${reviewType}`);
+              console.log(`Successfully created PR review of type: ${reviewType} with ${formattedComments.length} line comments`);
             } catch (error) {
               console.error('Error creating PR review:', error);
             }
