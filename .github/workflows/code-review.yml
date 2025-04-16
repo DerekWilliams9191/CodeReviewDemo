@@ -214,9 +214,10 @@ jobs:
               done
             fi
             
-            # Check for logging issues
+            # Check for logging issues - FIXED VERSION
             LOGGING_LINES=$(grep -n "Uncomment for LOGGING issue" "$FILE" | cut -d: -f1)
-            LOGGER_LINES=$(grep -n -A 1 "/\*.*_logger\.Log" "$FILE" | head -1 | cut -d: -f1)
+            # Fix: Improved the regex to properly catch commented logging statements
+            LOGGER_LINES=$(grep -n "/\*.*_logger\.Log" "$FILE" | cut -d: -f1)
             if [ -n "$LOGGING_LINES" ] || [ -n "$LOGGER_LINES" ]; then
               MISSING_LOGGING=true
               ISSUES_FOUND=true
