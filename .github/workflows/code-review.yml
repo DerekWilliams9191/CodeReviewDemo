@@ -147,7 +147,7 @@ jobs:
                   "line": $LINE_NUM,
                   "body": "Missing null check. Please uncomment this line to prevent null reference exceptions."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -169,7 +169,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing input validation. Please uncomment this validation check."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -191,7 +191,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing validation. Please uncomment this validator call."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -213,7 +213,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing documentation. Please uncomment the XML documentation in this section."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -235,7 +235,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing exception handling. Please uncomment this try/catch block."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -258,7 +258,7 @@ EOF
                     "line": $LINE_NUM,
                     "body": "Missing exception handling. Please uncomment this catch block."
                   }
-EOF
+          EOF
                   )
                   # Append to the JSON array
                   TEMP=$(mktemp)
@@ -281,7 +281,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing logging. Please uncomment the logging statements in this section."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -303,7 +303,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing logging. Please uncomment this block of logging statements."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -325,7 +325,7 @@ EOF
                   "line": $LINE_NUM,
                   "body": "Missing documentation. Please uncomment this block of XML documentation."
                 }
-EOF
+          EOF
                 )
                 # Append to the JSON array
                 TEMP=$(mktemp)
@@ -357,7 +357,7 @@ EOF
                     "line": $BLOCK_START_LINE_IN_FILE,
                     "body": "Code quality improvements needed. Please uncomment the STEP 2 code block that contains logging and documentation."
                   }
-EOF
+          EOF
                   )
                   # Append to the JSON array
                   TEMP=$(mktemp)
