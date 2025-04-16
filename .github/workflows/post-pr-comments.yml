@@ -37,7 +37,6 @@ jobs:
       
       - name: Find PR number
         id: find_pr
-        if: steps.check_artifact.outputs.artifact_exists == 'true'
         run: |
           echo "Looking for PR number in workflow run ${{ github.event.workflow_run.id }}"
           
