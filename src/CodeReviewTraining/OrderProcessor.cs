@@ -82,18 +82,18 @@ namespace CodeReviewTraining
             // ===========================================================
             
             // Uncomment for LOGGING issue
-            /*
+            
             _logger.LogInformation("Processing order for customer {CustomerId}", orderRequest.CustomerId);
-            */
+            
         }
 
         // Uncomment for DOCUMENTATION issue
-        /*
+        
         /// <summary>
         /// Generates a unique tracking number for an order
         /// </summary>
         /// <returns>A tracking number in the format XXX-YYYYY-ZZ</returns>
-        */
+        
         private string GenerateTrackingNumber()
         {
             var random = new Random();
