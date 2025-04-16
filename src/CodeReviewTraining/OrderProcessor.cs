@@ -32,7 +32,7 @@ namespace CodeReviewTraining
             // ===========================================================
             
             // Uncomment for NULL CHECKS issue - REQUIRED TO PASS TESTS
-            /*
+            
             if (orderRequest == null)
             {
                 throw new ArgumentNullException(nameof(orderRequest), "Order request cannot be null");
@@ -43,15 +43,15 @@ namespace CodeReviewTraining
             {
                 throw new ValidationException("Order request failed validation");
             }
-            */
+            
 
             OrderConfirmation confirmation = null;
             
             // Uncomment for EXCEPTION HANDLING issue - REQUIRED TO PASS TESTS
-            /*
+            
             try
             {
-            */
+            
                 var order = new Order
                 {
                     OrderId = Guid.NewGuid(),
@@ -68,14 +68,14 @@ namespace CodeReviewTraining
                     TrackingNumber = GenerateTrackingNumber(),
                     EstimatedDelivery = DateTime.UtcNow.AddDays(3)
                 };
-            /*
+            
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing order for customer {CustomerId}", orderRequest.CustomerId);
                 throw;
             }
-            */
+            
 
             return confirmation;
             
