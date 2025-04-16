@@ -95,7 +95,7 @@ jobs:
           recreate: true
         continue-on-error: true
       
-      # Create an actual PR review with REQUEST_CHANGES or APPROVE status
+      # Create an actual PR review with REQUEST_CHANGES or APPROVE status and line comments
       - name: Create PR review
         if: steps.find_pr.outputs.pr_number != ''
         uses: actions/github-script@v6
@@ -122,18 +122,37 @@ jobs:
                 return;
               }
               
-              // Create a review
-              await github.rest.pulls.createReview({
+              // Check if line comments file exists
+              let comments = [];
+              if (fs.existsSync('artifacts/line_comments.json')) {
+                try {
+                  const lineCommentsContent = fs.readFileSync('artifacts/line_comments.json', 'utf8');
+                  comments = JSON.parse(lineCommentsContent);
+                  console.log(`Found ${comments.length} line comments to add to the review`);
+                } catch (error) {
+                  console.error('Error parsing line comments:', error);
+                  // Continue with empty comments if parsing fails
+                  comments = [];
+                }
+              }
+              
+              // Create a review with line comments
+              const createReviewResponse = await github.rest.pulls.createReview({
                 pull_number: ${{ steps.find_pr.outputs.pr_number }},
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body: reviewBody,
-                event: reviewType
+                event: reviewType,
+                comments: comments
               });
               
-              console.log(`Successfully created PR review of type: ${reviewType}`);
+              console.log(`Successfully created PR review of type: ${reviewType} with ${comments.length} line comments`);
+              console.log(`Review ID: ${createReviewResponse.data.id}`);
+              
             } catch (error) {
               console.error('Error creating PR review:', error);
+              console.error(error.stack);
+              console.error('Response:', error.response ? error.response.data : 'No response data');
             }
       
       # Post notification if PR not found
