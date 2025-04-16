@@ -73,6 +73,9 @@ jobs:
           echo "REQUEST_CHANGES" > artifacts/review_type.txt
           echo "Tests are failing. Please fix the functionality issues first." > artifacts/review_body.txt
           
+          # Create an empty line comments file
+          echo "[]" > artifacts/line_comments.json
+          
       - name: Upload failing test message
         if: steps.test.outputs.test_passed == 'false'
         uses: actions/upload-artifact@v4
@@ -97,6 +100,10 @@ jobs:
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: '7.0.x'
+      
+      # Install jq for JSON processing
+      - name: Install jq
+        run: sudo apt-get install -y jq
           
       - name: Analyze Code and Create Review Message
         id: analyze
@@ -104,94 +111,273 @@ jobs:
           # Create artifacts directory
           mkdir -p artifacts
           
-          # Get all C# files that were modified in this PR
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '\.cs')
-
-          # Initialize tracking variables
-          ISSUES_FOUND=false
-          MISSING_NULL_CHECKS=false
-          MISSING_VALIDATION=false
-          MISSING_DOCUMENTATION=false
-          MISSING_EXCEPTION_HANDLING=false
-          MISSING_LOGGING=false
+          # Create an empty line comments file
+          echo "[]" > artifacts/line_comments.json
           
-          # Loop through each modified C# file
-          for FILE in $FILES; do
-            echo "Analyzing $FILE..."
+          # Get all C# files that were modified in this PR
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep '\.cs' || echo "")
+          
+          if [ -z "$FILES" ]; then
+            echo "No C# files were modified in this PR."
+            ISSUES_FOUND=false
+          else
+            # Initialize tracking variables
+            ISSUES_FOUND=false
+            MISSING_NULL_CHECKS=false
+            MISSING_VALIDATION=false
+            MISSING_DOCUMENTATION=false
+            MISSING_EXCEPTION_HANDLING=false
+            MISSING_LOGGING=false
             
-            # Check for null checks (looking for commented out null check patterns)
-            if grep -q "//\s*if\s*(.*\s*==\s*null)" "$FILE"; then
-              MISSING_NULL_CHECKS=true
-              ISSUES_FOUND=true
-            fi
-            
-            # Check for input validation (looking for commented validation code)
-            if grep -q "//\s*if\s*(!.*\.IsValid" "$FILE" || grep -q "//\s*validator\.Validate" "$FILE"; then
-              MISSING_VALIDATION=true
-              ISSUES_FOUND=true
-            fi
-            
-            # NEW: Look for specific marker phrases
-            if grep -q "Uncomment for DOCUMENTATION issue" "$FILE"; then
-              MISSING_DOCUMENTATION=true
-              ISSUES_FOUND=true
-              echo "Found DOCUMENTATION issue marker"
-            fi
-            
-            # Check for exception handling
-            if grep -q "//\s*try" "$FILE" || grep -q "//\s*catch" "$FILE"; then
-              MISSING_EXCEPTION_HANDLING=true
-              ISSUES_FOUND=true
-            fi
-            
-            # NEW: Look for specific marker phrases
-            if grep -q "Uncomment for LOGGING issue" "$FILE"; then
-              MISSING_LOGGING=true
-              ISSUES_FOUND=true
-              echo "Found LOGGING issue marker"
-            fi
-            
-            # NEW: Check for block comments containing logger statements
-            if grep -qP "/\\*[\\s\\S]*?_logger\\.Log[\\s\\S]*?\\*/" "$FILE"; then
-              MISSING_LOGGING=true
-              ISSUES_FOUND=true
-              echo "Found block commented logger statements"
-            fi
-            
-            # NEW: Check for block comments containing documentation
-            if grep -qP "/\\*[\\s\\S]*?/// <summary>[\\s\\S]*?\\*/" "$FILE"; then
-              MISSING_DOCUMENTATION=true
-              ISSUES_FOUND=true
-              echo "Found block commented documentation"
-            fi
-            
-            # SPECIAL CHECK: Test if STEP 2 exists with its indicators
-            if grep -q "STEP 2: AFTER TESTS PASS" "$FILE"; then
-              echo "Found STEP 2 marker - checking if any STEP 2 code is still commented"
-              # Look for block comments after STEP 2 marker
-              grep -A 30 "STEP 2: AFTER TESTS PASS" "$FILE" > step2_section.txt
-              if grep -q "/\*" step2_section.txt; then
-                echo "Found block comments in STEP 2 section"
-                MISSING_LOGGING=true
+            # Loop through each modified C# file
+            for FILE in $FILES; do
+              echo "Analyzing $FILE..."
+              
+              # Check for null checks (looking for commented out null check patterns) with line numbers
+              grep -n "//\s*if\s*(.*\s*==\s*null)" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_NULL_CHECKS=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing null check. Please uncomment this line to prevent null reference exceptions."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Check for input validation (looking for commented validation code) with line numbers
+              grep -n "//\s*if\s*(!.*\.IsValid" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_VALIDATION=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing input validation. Please uncomment this validation check."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Check for validator validation patterns with line numbers
+              grep -n "//\s*validator\.Validate" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_VALIDATION=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing validation. Please uncomment this validator call."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Check for documentation markers with line numbers
+              grep -n "Uncomment for DOCUMENTATION issue" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
                 MISSING_DOCUMENTATION=true
                 ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing documentation. Please uncomment the XML documentation in this section."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Check for exception handling with line numbers
+              grep -n "//\s*try" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_EXCEPTION_HANDLING=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing exception handling. Please uncomment this try/catch block."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Check for catch blocks with line numbers
+              grep -n "//\s*catch" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_EXCEPTION_HANDLING=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON if we haven't already added one for the try block
+                if ! grep -q "\"line\": $((LINE_NUM-2))" artifacts/line_comments.json; then
+                  COMMENT=$(cat << EOF
+                  {
+                    "path": "$FILE",
+                    "line": $LINE_NUM,
+                    "body": "Missing exception handling. Please uncomment this catch block."
+                  }
+EOF
+                  )
+                  # Append to the JSON array
+                  TEMP=$(mktemp)
+                  jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                  mv "$TEMP" artifacts/line_comments.json
+                fi
+              done
+              
+              # Check for logging markers with line numbers
+              grep -n "Uncomment for LOGGING issue" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_LOGGING=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing logging. Please uncomment the logging statements in this section."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Find block commented logger statements with line numbers
+              grep -n -P "/\\*.*?_logger\\.Log" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_LOGGING=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing logging. Please uncomment this block of logging statements."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Find block commented documentation with line numbers
+              grep -n -P "/\\*.*?/// <summary>" "$FILE" | while read -r LINE_INFO; do
+                LINE_NUM=$(echo "$LINE_INFO" | cut -d':' -f1)
+                MATCH_TEXT=$(echo "$LINE_INFO" | cut -d':' -f2-)
+                MISSING_DOCUMENTATION=true
+                ISSUES_FOUND=true
+                
+                # Add to line comments JSON
+                COMMENT=$(cat << EOF
+                {
+                  "path": "$FILE",
+                  "line": $LINE_NUM,
+                  "body": "Missing documentation. Please uncomment this block of XML documentation."
+                }
+EOF
+                )
+                # Append to the JSON array
+                TEMP=$(mktemp)
+                jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                mv "$TEMP" artifacts/line_comments.json
+              done
+              
+              # Check for STEP 2 marker and any commented code after it
+              if grep -q "STEP 2: AFTER TESTS PASS" "$FILE"; then
+                STEP2_LINE_NUM=$(grep -n "STEP 2: AFTER TESTS PASS" "$FILE" | cut -d':' -f1)
+                echo "Found STEP 2 marker at line $STEP2_LINE_NUM - checking if any STEP 2 code is still commented"
+                
+                # Look for block comments after STEP 2 marker
+                grep -n -A 30 "STEP 2: AFTER TESTS PASS" "$FILE" > step2_section.txt
+                BLOCK_START_LINE=$(grep -n "/\*" step2_section.txt | head -1 | cut -d':' -f1)
+                
+                if [ ! -z "$BLOCK_START_LINE" ]; then
+                  # Calculate actual line number in file
+                  BLOCK_START_LINE_IN_FILE=$((STEP2_LINE_NUM + BLOCK_START_LINE - 1))
+                  echo "Found block comment in STEP 2 section at line $BLOCK_START_LINE_IN_FILE"
+                  MISSING_LOGGING=true
+                  MISSING_DOCUMENTATION=true
+                  ISSUES_FOUND=true
+                  
+                  # Add to line comments JSON
+                  COMMENT=$(cat << EOF
+                  {
+                    "path": "$FILE",
+                    "line": $BLOCK_START_LINE_IN_FILE,
+                    "body": "Code quality improvements needed. Please uncomment the STEP 2 code block that contains logging and documentation."
+                  }
+EOF
+                  )
+                  # Append to the JSON array
+                  TEMP=$(mktemp)
+                  jq --argjson comment "$COMMENT" '. += [$comment]' artifacts/line_comments.json > "$TEMP"
+                  mv "$TEMP" artifacts/line_comments.json
+                fi
               fi
-            fi
-          done
+            done
+          fi
           
           # Debug - print final issue status for verification
           echo "Final status:"
           echo "ISSUES_FOUND=$ISSUES_FOUND"
-          echo "MISSING_LOGGING=$MISSING_LOGGING"
-          echo "MISSING_DOCUMENTATION=$MISSING_DOCUMENTATION"
+          
+          # Count the number of line comments
+          LINE_COMMENT_COUNT=$(jq 'length' artifacts/line_comments.json)
+          echo "Number of line comments: $LINE_COMMENT_COUNT"
           
           # Save the issues found status to a file
           echo "ISSUES_FOUND=$ISSUES_FOUND" > artifacts/analysis_results.txt
-          echo "MISSING_NULL_CHECKS=$MISSING_NULL_CHECKS" >> artifacts/analysis_results.txt
-          echo "MISSING_VALIDATION=$MISSING_VALIDATION" >> artifacts/analysis_results.txt
-          echo "MISSING_DOCUMENTATION=$MISSING_DOCUMENTATION" >> artifacts/analysis_results.txt
-          echo "MISSING_EXCEPTION_HANDLING=$MISSING_EXCEPTION_HANDLING" >> artifacts/analysis_results.txt
-          echo "MISSING_LOGGING=$MISSING_LOGGING" >> artifacts/analysis_results.txt
           
           # Create the PR comment content for issue cases
           if [ "$ISSUES_FOUND" == "true" ]; then
@@ -221,10 +407,10 @@ jobs:
               echo "- ❌ **Missing Logging**: The code doesn't include proper logging. Uncomment the logging statements." >> artifacts/review_message.md
             fi
             
-            echo -e "\nPlease address these code quality issues by uncommenting the correct code sections and update your PR." >> artifacts/review_message.md
+            echo -e "\nPlease address these code quality issues by uncommenting the correct code sections and update your PR. See the line comments on the PR for specific locations of issues." >> artifacts/review_message.md
             
             # Create the PR review body (shorter version that goes with the PR review)
-            echo "Code quality issues found. Please address them by uncommenting the necessary code." > artifacts/review_body.txt
+            echo "Code quality issues found. Please address them by uncommenting the necessary code. See line comments for details." > artifacts/review_body.txt
             
             # Indicate this should be a "REQUEST_CHANGES" review
             echo "REQUEST_CHANGES" > artifacts/review_type.txt
