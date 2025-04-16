@@ -15,24 +15,45 @@ jobs:
     
     steps:
       - name: Download artifact
+        id: download_artifact
         uses: dawidd6/action-download-artifact@v2
         with:
           workflow: ${{ github.event.workflow_run.workflow_id }}
           run_id: ${{ github.event.workflow_run.id }}
           name: pr_message
           path: artifacts
+        continue-on-error: true
+      
+      - name: Check artifact download
+        id: check_artifact
+        run: |
+          if [ ! -d "artifacts" ] || [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
+            echo "::error::Failed to download artifacts or artifacts directory is empty"
+            echo "artifact_exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "artifact_exists=true" >> $GITHUB_OUTPUT
+          fi
       
       - name: Find PR number
         id: find_pr
+        if: steps.check_artifact.outputs.artifact_exists == 'true'
         run: |
           echo "Looking for PR number in workflow run ${{ github.event.workflow_run.id }}"
           
+          # Check if PR number was directly provided in an artifact
+          if [ -f "artifacts/pr_number.txt" ]; then
+            PR_NUMBER=$(cat artifacts/pr_number.txt)
+            echo "Found PR number in artifact: $PR_NUMBER"
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
           # Extract the PR number from the source workflow
-          # We need to get details about the original workflow run
           RUN_INFO=$(curl -s -H "Authorization: token ${{ github.token }}" \
             "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}")
           
-          # Extract the head branch name
+          # Extract the head branch name and SHA
           HEAD_BRANCH=$(echo "$RUN_INFO" | jq -r '.head_branch')
           HEAD_SHA=$(echo "$RUN_INFO" | jq -r '.head_sha')
           
@@ -44,20 +65,21 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/pulls?state=open&head=${{ github.repository_owner }}:$HEAD_BRANCH")
           
           # Extract the first PR number (if any)
-          PR_NUMBER=$(echo "$PR_DATA" | jq '.[0].number')
+          PR_NUMBER=$(echo "$PR_DATA" | jq -r '.[0].number')
           
-          # If no PR found, try looking for closed PRs that match the SHA
-          if [ "$PR_NUMBER" = "null" ]; then
+          # If no PR found or null, try looking for PRs that match the SHA
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "No open PR found for branch. Checking by commit SHA..."
             PR_DATA=$(curl -s -H "Authorization: token ${{ github.token }}" \
               "https://api.github.com/repos/${{ github.repository }}/pulls?state=all")
             
-            PR_NUMBER=$(echo "$PR_DATA" | jq --arg sha "$HEAD_SHA" '.[] | select(.head.sha==$sha) | .number' | head -1)
+            PR_NUMBER=$(echo "$PR_DATA" | jq -r --arg sha "$HEAD_SHA" '.[] | select(.head.sha==$sha) | .number' | head -1)
           fi
           
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "ERROR: Could not find PR number"
+            echo "::warning::Could not find PR number"
             echo "pr_number=" >> $GITHUB_OUTPUT
+            exit 1
           else
             echo "Found PR number: $PR_NUMBER"
             echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
@@ -71,6 +93,7 @@ jobs:
           number: ${{ steps.find_pr.outputs.pr_number }}
           path: artifacts/review_message.md
           recreate: true
+        continue-on-error: true
       
       # Create an actual PR review with REQUEST_CHANGES or APPROVE status
       - name: Create PR review
@@ -81,15 +104,54 @@ jobs:
           script: |
             const fs = require('fs');
             
-            // Read review data from artifacts
-            const reviewType = fs.readFileSync('artifacts/review_type.txt', 'utf8').trim();
-            const reviewBody = fs.readFileSync('artifacts/review_body.txt', 'utf8').trim();
+            try {
+              // Check if files exist before reading
+              if (!fs.existsSync('artifacts/review_type.txt') || !fs.existsSync('artifacts/review_body.txt')) {
+                console.error('Required review files not found in artifacts');
+                return;
+              }
+              
+              // Read review data from artifacts
+              const reviewType = fs.readFileSync('artifacts/review_type.txt', 'utf8').trim();
+              const reviewBody = fs.readFileSync('artifacts/review_body.txt', 'utf8').trim();
+              
+              // Validate review type
+              const validReviewTypes = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
+              if (!validReviewTypes.includes(reviewType)) {
+                console.error(`Invalid review type: ${reviewType}. Must be one of: ${validReviewTypes.join(', ')}`);
+                return;
+              }
+              
+              // Create a review
+              await github.rest.pulls.createReview({
+                pull_number: ${{ steps.find_pr.outputs.pr_number }},
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: reviewBody,
+                event: reviewType
+              });
+              
+              console.log(`Successfully created PR review of type: ${reviewType}`);
+            } catch (error) {
+              console.error('Error creating PR review:', error);
+            }
+      
+      # Post notification if PR not found
+      - name: Create issue if PR not found
+        if: steps.find_pr.outputs.pr_number == '' && steps.check_artifact.outputs.artifact_exists == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
             
-            // Create a review
-            await github.rest.pulls.createReview({
-              pull_number: ${{ steps.find_pr.outputs.pr_number }},
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: reviewBody,
-              event: reviewType
-            });
+            try {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Code Review Failed - PR Not Found',
+                body: `The "Post PR Review" workflow could not find an associated PR for workflow run #${{ github.event.workflow_run.id }}.\n\nPlease check the workflow logs for more details: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
+            } catch (error) {
+              console.error('Error creating notification issue:', error);
+            }
